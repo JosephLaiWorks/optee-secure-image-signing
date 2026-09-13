@@ -1,73 +1,79 @@
 # OP-TEE Secure Image Signing System
 
-A C-based image integrity verification project built with **OP-TEE**, using **SHA-256** and **RSA-2048 digital signatures** inside a Trusted Application (TA).
+A C-based image integrity verification project built with **OP-TEE**, **SHA-256**, **RSA-2048**, and **OpenSSL**.
 
-The system keeps private-key operations inside the TEE, returns only the generated signature to the Rich Execution Environment (REE), and verifies signed images with OpenSSL using exported public-key components.
+The system keeps private-key operations inside the Trusted Execution Environment (TEE), returns only signatures to the Rich Execution Environment (REE), and verifies image integrity with exported public-key components.
 
-## Key Features
+## Highlights
 
 - SHA-256 hashing inside an OP-TEE Trusted Application
-- RSA-2048 signing with `RSASSA-PKCS1-v1_5-SHA256`
-- RSA key generation and storage through OP-TEE Secure Storage
+- RSA-2048 digital signing with `RSASSA-PKCS1-v1_5-SHA256`
+- RSA key management through OP-TEE Secure Storage
 - Public-key export as RSA modulus and exponent
-- Batch signing of files from an image directory
+- Batch image signing from a directory
 - Signature verification in the REE using OpenSSL
-- Tampered-image test demonstrating signature verification failure after image modification
+- Tampered-image test that demonstrates verification failure after image modification
 
 ## System Architecture
 
 ```mermaid
 flowchart TD
-    A[Image Files<br/>/usr/share/photo_samples] --> B[Client Application<br/>REE / Normal World]
+    A[Image Files<br/>/usr/share/photo_samples]
+    B[Client Application<br/>REE / Normal World]
 
-    B -->|TEEC_InvokeCommand<br/>image bytes| C[Trusted Application<br/>TEE / Secure World]
+    A --> B
+    B -->|TEEC_InvokeCommand<br/>image bytes| C
 
-    subgraph TEE[Secure World]
-        C --> D[SHA-256 Digest]
-        F[Secure Storage<br/>RSA-2048 Key] --> E[RSA Signing<br/>PKCS#1 v1.5 + SHA-256]
+    subgraph TEE[TEE / Secure World]
+        C[Trusted Application]
+        D[SHA-256 Digest]
+        E[RSA-2048 Signing<br/>PKCS#1 v1.5 + SHA-256]
+        F[Secure Storage<br/>RSA Key]
+        G[Export Public Key<br/>Modulus + Exponent]
+
+        C --> D
         D --> E
-        F --> G[Export Public-Key Components]
+        F --> E
+        F --> G
     end
 
     E -->|Signature| B
-    G -->|Modulus + Exponent| B
+    G -->|Public-key components| B
 
     B --> H[.sig Files<br/>/host]
     B --> I[modulus.bin<br/>exponent.bin]
 
-    H --> J[OpenSSL Verification<br/>REE]
+    A --> J[OpenSSL Verification<br/>REE]
+    H --> J
     I --> J
-    A --> J
 
-    J --> K{Valid Signature?}
-    K -->|Yes| L[Original Image<br/>Signature OK]
-    K -->|No| M[Tampered Image<br/>Signature FAIL]
+    J --> K{Signature valid?}
+    K -->|Yes| L[Original Image<br/>PASS]
+    K -->|No| M[Tampered Image<br/>FAIL]
 ```
 
 ## How It Works
 
-### 1. Establish a session with the Trusted Application
+### 1. Open a session with the Trusted Application
 
-The client application initializes an OP-TEE context and opens a session with the TA using the OP-TEE Client API.
+The REE client initializes an OP-TEE context and opens a session with the TA using the OP-TEE Client API.
 
 ### 2. Initialize the RSA key
 
-When the TA is created, it attempts to open the RSA key object named `rsa_key` from Secure Storage.
+When the TA starts, it attempts to open the RSA key object named `rsa_key` from Secure Storage.
 
 If the key does not exist, the TA:
 
 1. Allocates an RSA-2048 key-pair object.
 2. Generates a new RSA key pair.
 3. Stores the key object using OP-TEE Secure Storage.
-4. Extracts the public modulus and exponent and stores them as `rsa_modulus` and `rsa_exponent` objects for later export.
+4. Extracts the public modulus and exponent for later export.
 
 The private key is not exported to the REE.
 
 ### 3. Sign an image inside the TEE
 
-For each input image, the REE reads the file and sends its bytes to the TA using `TA_CMD_SIGN_PHOTO`.
-
-Inside the TA:
+For each image, the REE reads the file and sends its bytes to the TA with `TA_CMD_SIGN_PHOTO`.
 
 ```text
 Image bytes
@@ -90,54 +96,47 @@ The signature is returned to the REE and saved as:
 
 ### 4. Export the public key
 
-The REE invokes `TA_CMD_EXPORT_PUBKEY` to obtain the RSA public-key components stored by the TA.
-
-They are written as:
+The REE invokes `TA_CMD_EXPORT_PUBKEY` and receives the RSA public-key components:
 
 ```text
 /host/modulus.bin
 /host/exponent.bin
 ```
 
-Only public-key components are exported. The RSA private key remains in the TEE.
+Only public information is exported.
 
 ### 5. Verify the signature in the REE
 
-The verification code uses OpenSSL to:
+The OpenSSL verification code:
 
-1. Read the image.
-2. Recompute its SHA-256 digest.
-3. Load the `.sig` file.
-4. Reconstruct the RSA public key from the modulus and exponent.
-5. Call `RSA_verify()` with the SHA-256 digest, signature, and public key.
+1. Reads the image.
+2. Recomputes its SHA-256 digest.
+3. Loads the `.sig` file.
+4. Reconstructs the RSA public key from the modulus and exponent.
+5. Calls `RSA_verify()`.
 
-A valid original image produces a successful verification result. If the image content is modified while reusing the original signature, verification fails because the recomputed SHA-256 digest no longer matches the signed digest.
+If the image content is modified while reusing the original signature, verification fails because the recomputed digest no longer matches the signed digest.
 
-## Signing and Verification Sequence
+## Signing and Verification Flow
 
 ```mermaid
 sequenceDiagram
-    participant IMG as Image File
     participant CA as Client App (REE)
     participant TA as Trusted App (TEE)
     participant SS as Secure Storage
     participant SSL as OpenSSL (REE)
 
-    CA->>IMG: Read image bytes
-    IMG-->>CA: Image data
-
     CA->>TA: TA_CMD_SIGN_PHOTO(image)
     TA->>TA: SHA-256(image)
-    TA->>SS: Use RSA-2048 private key
-    SS-->>TA: Private-key handle
+    TA->>SS: Access RSA-2048 key
+    SS-->>TA: Key object
     TA->>TA: Sign digest
     TA-->>CA: Return signature
 
-    CA->>CA: Save /host/<image>.sig
+    CA->>CA: Save .sig
 
     CA->>TA: TA_CMD_EXPORT_PUBKEY
     TA-->>CA: Modulus + exponent
-    CA->>CA: Save modulus.bin / exponent.bin
 
     CA->>SSL: Image + signature + public key
     SSL->>SSL: SHA-256(image)
@@ -149,19 +148,6 @@ sequenceDiagram
         SSL-->>CA: Signature FAIL
     end
 ```
-
-## OP-TEE Commands
-
-The client and TA communicate using the command IDs defined in `save_pic_ta.h`.
-
-| Command | Purpose |
-|---|---|
-| `TA_SECURE_STORAGE_CMD_READ_RAW` | Read a raw object from Secure Storage |
-| `TA_SECURE_STORAGE_CMD_WRITE_RAW` | Write a raw object to Secure Storage |
-| `TA_SECURE_STORAGE_CMD_DELETE` | Delete an object from Secure Storage |
-| `TA_CMD_HASH_PHOTO` | Compute SHA-256 inside the TA |
-| `TA_CMD_SIGN_PHOTO` | Hash and sign image data inside the TA |
-| `TA_CMD_EXPORT_PUBKEY` | Export RSA modulus and public exponent |
 
 ## Project Structure
 
@@ -187,54 +173,54 @@ optee-secure-image-signing/
             └── save_pic_ta.h
 ```
 
-## Main Source Files
+## Main Components
 
-### `save_pic/host/main.c`
+### REE Client — `save_pic/host/main.c`
 
-REE-side client application responsible for:
+Responsible for:
 
-- initializing and closing the OP-TEE session
-- scanning image files
+- opening and closing the OP-TEE session
+- scanning input images
 - sending image data to the TA
 - saving returned signatures
-- requesting the public-key components
-- starting verification tests
+- requesting public-key components
+- launching verification tests
 
-### `save_pic/ta/save_pic_ta.c`
+### Trusted Application — `save_pic/ta/save_pic_ta.c`
 
-Trusted Application responsible for:
+Responsible for:
 
 - RSA-2048 key initialization
 - Secure Storage operations
 - SHA-256 hashing
 - RSA digital signing
-- public-key component export
+- public-key export
 - OP-TEE command dispatch
 
-### `save_pic/host/verify_signature.c`
+### Verification — `save_pic/host/verify_signature.c`
 
-REE-side OpenSSL verification logic responsible for:
+Responsible for:
 
 - recalculating SHA-256
-- reconstructing an RSA public key from modulus and exponent
+- rebuilding the RSA public key from modulus and exponent
 - calling `RSA_verify()`
-- reporting successful or failed verification
+- reporting verification success or failure
 
-## Demonstration Flow
+## Demo Behavior
 
-The current demo flow uses images under:
+Input images are read from:
 
 ```text
 /usr/share/photo_samples
 ```
 
-and writes generated artifacts under:
+Generated files are written under:
 
 ```text
 /host
 ```
 
-Typical outputs include:
+Typical outputs:
 
 ```text
 /host/<image>.sig
@@ -242,15 +228,15 @@ Typical outputs include:
 /host/exponent.bin
 ```
 
-For the tampering test, a modified image is placed at:
+A modified test image is placed under:
 
 ```text
 /usr/share/fake_photo/fake.jpg
 ```
 
-and is verified using a signature originating from the unmodified image. Because the modified image produces a different SHA-256 digest, signature verification fails.
+Using the original signature with the modified image causes verification to fail.
 
-Example result:
+Example:
 
 ```text
 [✔] Signature OK: /usr/share/photo_samples/<original-image>
@@ -259,24 +245,19 @@ Example result:
 
 ## Security Boundary
 
-The project separates responsibilities between the normal and secure worlds:
-
 **REE / Normal World**
-
-- file I/O
-- directory scanning
-- `.sig` output
+- file I/O and directory scanning
+- signature-file output
 - public-key handling
 - OpenSSL verification
 
 **TEE / Secure World**
-
 - SHA-256 hashing for signing
 - RSA-2048 private-key operations
 - Secure Storage
 - digital signature generation
 
-The main security goal is to avoid exposing the RSA private key to the normal-world application while still allowing images to be signed and verified.
+The key design goal is to keep private-key operations inside the secure world while allowing normal-world software to verify signed images.
 
 ## Technologies
 
@@ -291,18 +272,15 @@ The main security goal is to avoid exposing the RSA private key to the normal-wo
 - PKCS#1 v1.5 signature scheme
 - OpenSSL
 
-## Repository Notes
-
-This repository contains the core source code used for the project demonstration. Build artifacts, generated signatures, and temporary files are excluded from version control.
-
 ## What This Project Demonstrates
 
-This project demonstrates practical use of a Trusted Execution Environment rather than implementing RSA or SHA-256 algorithms from scratch. It focuses on:
+This project focuses on applying OP-TEE and cryptographic APIs in a working image-signing pipeline rather than implementing RSA or SHA-256 from scratch.
 
-- separating sensitive cryptographic operations from normal-world code
-- invoking a Trusted Application from an REE client
-- managing cryptographic key objects with OP-TEE Secure Storage
-- using OP-TEE cryptographic APIs for hashing and signing
-- integrating a TEE-generated signature with OpenSSL verification in Linux
-- validating image integrity with a tampering test
+It demonstrates:
 
+- separation between REE and TEE responsibilities
+- invocation of a Trusted Application from a normal-world client
+- key-object management with OP-TEE Secure Storage
+- cryptographic hashing and signing inside the TEE
+- OpenSSL-based verification in Linux
+- tampered-image detection through signature verification
