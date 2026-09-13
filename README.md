@@ -243,6 +243,12 @@ Example:
 [✘] Signature FAIL: /usr/share/fake_photo/fake.jpg
 ```
 
+## Demo Result
+
+The following run shows successful verification for the original images and verification failure for the tampered image.
+
+![OP-TEE signing and verification result](images/demo-verification-result.jpg)
+
 ## Security Boundary
 
 **REE / Normal World**
