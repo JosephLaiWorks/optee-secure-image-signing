@@ -60,16 +60,9 @@ The REE client initializes an OP-TEE context and opens a session with the TA usi
 
 ### 2. Initialize the RSA key
 
-When the TA starts, it attempts to open the RSA key object named `rsa_key` from Secure Storage.
-
-If the key does not exist, the TA:
-
-1. Allocates an RSA-2048 key-pair object.
-2. Generates a new RSA key pair.
-3. Stores the key object using OP-TEE Secure Storage.
-4. Extracts the public modulus and exponent for later export.
-
-The private key is not exported to the REE.
+The TA supports loading an existing RSA key object named `rsa_key` from OP-TEE Secure Storage. If the key does not exist, it generates a new RSA-2048 key pair and stores it as a persistent object.
+In the current demo flow, however, the REE client explicitly deletes the existing `rsa_key` before the signing workflow begins. Therefore, each demo run starts with a newly generated RSA key pair.
+The private key remains inside the TEE and is not exported to the REE. Only the public modulus and exponent are exported for verification.
 
 ### 3. Sign an image inside the TEE
 
