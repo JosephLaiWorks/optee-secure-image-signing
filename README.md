@@ -210,6 +210,30 @@ Responsible for:
 
 ## Demo Behavior
 
+Inside the QEMU/Buildroot runtime environment, input images are read from:
+
+```text
+/usr/share/photo_samples
+```
+Generated runtime files are written to:
+```text
+/host
+```
+
+Typical outputs include:
+```text
+/host/<image>.sig
+/host/modulus.bin
+/host/exponent.bin
+```
+
+A modified test image is placed at:
+```text
+/usr/share/fake_photo/fake.jpg
+```
+
+**These paths refer to the QEMU/Buildroot runtime filesystem, not to the GitHub repository directories.**
+
 Input images are read from:
 
 ```text
