@@ -232,34 +232,6 @@ A modified test image is placed at:
 /usr/share/fake_photo/fake.jpg
 ```
 
-**These paths refer to the QEMU/Buildroot runtime filesystem, not to the GitHub repository directories.**
-
-Input images are read from:
-
-```text
-/usr/share/photo_samples
-```
-
-Generated files are written under:
-
-```text
-/host
-```
-
-Typical outputs:
-
-```text
-/host/<image>.sig
-/host/modulus.bin
-/host/exponent.bin
-```
-
-A modified test image is placed under:
-
-```text
-/usr/share/fake_photo/fake.jpg
-```
-
 Using the original signature with the modified image causes verification to fail.
 
 Example:
@@ -268,6 +240,8 @@ Example:
 [✔] Signature OK: /usr/share/photo_samples/<original-image>
 [✘] Signature FAIL: /usr/share/fake_photo/fake.jpg
 ```
+
+**These paths refer to the QEMU/Buildroot runtime filesystem, not to the GitHub repository directories.**
 
 ## Demo Result
 
